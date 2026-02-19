@@ -1,0 +1,53 @@
+ 
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'SenTekkiColors.dart';
+import 'registration/login.dart';
+import 'dashboard.dart';
+
+void main() async {
+  
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final prefs = await SharedPreferences.getInstance();
+  final token = prefs.getString('token');
+
+  runApp(SenTekkiApp(initialRoute: token != null ? const DashboardScreen() : const LoginScreen()));
+}
+
+class SenTekkiApp extends StatelessWidget {
+  final Widget initialRoute;
+  const SenTekkiApp({super.key, required this.initialRoute});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: "SenTekki",
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primaryColor: SenTekkiColors.primary,
+        scaffoldBackgroundColor: SenTekkiColors.lightGray,
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: SenTekkiColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: SenTekkiColors.primary, width: 2),
+          ),
+        ),
+      ),
+      home: initialRoute,
+    );
+  }
+}

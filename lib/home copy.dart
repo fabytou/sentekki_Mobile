@@ -1,177 +1,322 @@
-import 'package:flutter/material.dart';
-import 'SenTekkiColors.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+
+import 'auth_state.dart';
+import 'correction.dart';
+import 'historique.dart';
+import 'api_constants.dart';
+import 'custom_app_bar.dart';
+import 'nav_bar.dart';
+import 'CorrectionsPage.dart'; 
 
 class Home extends StatefulWidget {
-  const Home({super.key});
+  const Home({Key? key}) : super(key: const PageStorageKey('home_page'));
 
   @override
   State<Home> createState() => _HomeState();
 }
 
 class _HomeState extends State<Home> {
-  final TextEditingController _controller = TextEditingController();
-String _result = "";
-String _fromLang = "fr"; // valeur par défaut
-String _toLang = "en";   // valeur par défaut
+  final TextEditingController _textController = TextEditingController();
+  List<Map<String, dynamic>> _sentences = [];
+  bool _isLoading = false;
+  int currentPopupId = 0;
+  int _selectedIndex = 0;
 
-void _translate() async {
-  print("Début de la fonction _translate ");
-  if (_controller.text.isEmpty) {
-    print("Champ texte vide");
-    return;
-  }
+  void handleSentenceClick(int id, String text) {
+    final auth = Provider.of<AuthState>(context, listen: false);
+    final String role = (auth.userRole ?? "").toLowerCase().trim();
 
-  // ⚠️ Remplace 127.0.0.1 par l’IP de ton PC (ex: 192.168.1.192)
-  final url = Uri.parse("http://127.0.0.1:8000/api/translate/");
-
-  try {
-    final response = await http.post(
-      url,
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({
-        "text": _controller.text,
-        "src": _fromLang,
-        "dest": _toLang,
-      }),
-    );
-
-    print("Response status: ${response.statusCode}");
-    print("Response body: ${response.body}");
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      setState(() {
-        // ✅ utilise la bonne clé envoyée par Django
-        _result = data["translated_text"] ?? "Aucune traduction reçue";
-      });
-    } else {
-      setState(() {
-        _result = "Erreur API: ${response.statusCode}";
-      });
+    if (role == "corrector" || role == "correcteur" || role == "admin" || role == "super_admin") {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CorrectionScreen(
+            sentenceText: text,
+            sentenceId: id,
+            translationId: currentPopupId,
+          ),
+        ),
+      );
     }
-  } catch (e) {
-    setState(() {
-      _result = "Erreur: $e";
-    });
-    print("Erreur lors de l'appel API: $e");
   }
-}
 
-  void _clear() {
-    setState(() {
-      _controller.clear();
-      _result = "";
-    });
+  void _onItemTapped(int index) {
+    final auth = Provider.of<AuthState>(context, listen: false);
+    final String role = (auth.userRole ?? "").toLowerCase().trim();
+    bool isCorrector = role == "corrector" || role == "correcteur" || role == "super_admin" || role == "admin";
+
+    if (index == 0) {
+      setState(() => _selectedIndex = 0);
+      return;
+    }
+
+    if (index == 2) {
+      setState(() => _selectedIndex = index);
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const TranslationHistoryPage()),
+      ).then((_) {
+        if (mounted) setState(() => _selectedIndex = 0);
+      });
+      return;
+    }
+
+    if (index == 3) {
+      if (isCorrector) {
+        setState(() => _selectedIndex = index);
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const PendingCorrectionsPage()),
+        ).then((_) {
+          if (mounted) setState(() => _selectedIndex = 0);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Accès réservé aux profils correcteurs."),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  // --- LOGIQUE DE TRADUCTION ---
+  Future<void> translateText() async {
+    if (_textController.text.trim().isEmpty) return;
+    setState(() => _isLoading = true);
+    final auth = Provider.of<AuthState>(context, listen: false);
+
+    try {
+      final bodyData = {
+        "input_text": _textController.text,
+        "lang_src": 'fr',
+        "lang_dest": 'en',
+      };
+
+      http.Response response;
+      if (auth.isAuthenticated) {
+        response = await auth.postWithAuth(ApiConstants.translateEndpoint, bodyData);
+      } else {
+        response = await http.post(
+          Uri.parse("${ApiConstants.baseUrl}${ApiConstants.translateEndpoint}"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode(bodyData),
+        );
+      }
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final List<dynamic>? rawSentences = data["output_sentence"];
+        setState(() {
+          currentPopupId = data['id'] ?? 0;
+          _sentences = rawSentences?.asMap().entries.map((e) => {
+            "id": e.key,
+            "text": e.value.toString(),
+          }).toList() ?? [];
+        });
+
+        if (auth.isAuthenticated && currentPopupId > 0) {
+          Future.delayed(const Duration(milliseconds: 600), () {
+            _showRatingPopup(currentPopupId);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Erreur: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- NOUVELLE FONCTION : ENVOI DE LA NOTE AU SERVEUR ---
+  Future<void> _submitRating(int translationId, int stars, String comment) async {
+    final auth = Provider.of<AuthState>(context, listen: false);
+    try {
+      // On utilise l'ID de la traduction pour envoyer la note
+      final response = await auth.postWithAuth("/translations/$translationId/rate/", {
+        "notes": stars, // Doit correspondre à la clé attendue par ton backend
+        "comment": comment,
+      });
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Note enregistrée !"), backgroundColor: Color(0xFF00A86B)),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Erreur lors de l'envoi de la note: $e");
+    }
+  }
+
+  void _showRatingPopup(int translationId) {
+    int selectedStars = 0;
+    final TextEditingController commentController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text("Notez la traduction", textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) => IconButton(
+                  icon: Icon(
+                    index < selectedStars ? Icons.star : Icons.star_border, 
+                    color: Colors.orange, size: 30
+                  ),
+                  onPressed: () => setStateDialog(() => selectedStars = index + 1),
+                )),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: commentController, 
+                decoration: const InputDecoration(
+                  hintText: "Votre avis (optionnel)",
+                  border: OutlineInputBorder()
+                )
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), 
+              child: const Text("Plus tard")
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                // APPEL DE LA FONCTION D'ENVOI
+                if (selectedStars > 0) {
+                  await _submitRating(translationId, selectedStars, commentController.text);
+                }
+                if (mounted) Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00A86B)),
+              child: const Text("Envoyer", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final auth = Provider.of<AuthState>(context);
+    final String role = (auth.userRole ?? "").toLowerCase().trim();
+    bool canCorrect = role == "corrector" || role == "correcteur" || role == "admin";
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: SenTekkiColors.primary,
-        title: const Text("SenTekki ", style: TextStyle(color: Colors.white)),
-        centerTitle: true,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      backgroundColor: const Color(0xFFF9FBFB),
+      appBar: const CustomAppBar(currentPageTitle: "Traduction"),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Bloc texte source
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Sélecteur langue source et destination
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      DropdownButton<String>(
-                        value: _fromLang,
-                        items: ["Francais", "Anglais"]
-                            .map((lang) =>
-                                DropdownMenuItem(value: lang, child: Text(lang)))
-                            .toList(),
-                        onChanged: (val) => setState(() => _fromLang = val!),
-                      ),
-                      Icon(Icons.arrow_forward, color: SenTekkiColors.primary),
-                      DropdownButton<String>(
-                        value: _toLang,
-                        items: ["Francais", "Anglais"]
-                            .map((lang) =>
-                                DropdownMenuItem(value: lang, child: Text(lang)))
-                            .toList(),
-                        onChanged: (val) => setState(() => _toLang = val!),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Champ texte source
-                  TextField(
-                    controller: _controller,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      hintText: "Écrire le texte à traduire...",
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Bouton traduire
-            ElevatedButton(
-              onPressed: _translate,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: SenTekkiColors.primary,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              child: const Text("Traduire"),
-            ),
-            const SizedBox(height: 16),
-
-            // Bloc résultat
-            if (_result.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: SenTekkiColors.lightGray,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_toLang,
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                            child: Text(_result,
-                                style: const TextStyle(fontSize: 16))),
-                        IconButton(
-                          onPressed: _clear,
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          tooltip: "Effacer",
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+            _buildInputCard(),
+            const SizedBox(height: 20),
+            if (_sentences.isNotEmpty) _buildResultCard(canCorrect),
           ],
         ),
+      ),
+      bottomNavigationBar: CustomBottomNavBar(
+        currentIndex: _selectedIndex,
+        onTap: _onItemTapped,
+      ),
+    );
+  }
+
+  Widget _buildInputCard() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: Color(0xFFE9F0F5)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          children: [
+            TextField(
+              controller: _textController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: "Saisissez votre texte...",
+                border: InputBorder.none,
+              ),
+            ),
+            const Divider(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("Français ➔ Anglais", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : translateText,
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00A86B)),
+                  child: _isLoading 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) 
+                    : const Text("Traduire", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultCard(bool canCorrect) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE9F0F5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("TRADUCTION", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+              if (currentPopupId > 0)
+                IconButton(
+                  icon: const Icon(Icons.star_outline, size: 18, color: Colors.orange),
+                  onPressed: () => _showRatingPopup(currentPopupId),
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.zero,
+                )
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            children: _sentences.map((s) => InkWell(
+              onTap: () => handleSentenceClick(s['id'], s['text']),
+              child: Text(
+                "${s['text']} ", 
+                style: TextStyle(
+                  fontSize: 18, 
+                  color: Colors.black87,
+                  decoration: canCorrect ? TextDecoration.underline : TextDecoration.none,
+                  decorationStyle: TextDecorationStyle.dashed,
+                  decorationColor: Colors.green
+                )
+              ),
+            )).toList(),
+          ),
+        ],
       ),
     );
   }
