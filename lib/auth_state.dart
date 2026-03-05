@@ -178,8 +178,7 @@ class AuthState extends ChangeNotifier {
     }
   }
 
-  // --- NOUVEAU : RÉCUPÉRATION DE L'HISTORIQUE ---
-  // Cette méthode gère les accès anonymes ET connectés sans planter.
+  // --- RÉCUPÉRATION DE L'HISTORIQUE ---
   Future<http.Response> getHistory({bool all = false}) async {
     final endpoint = all ? "/api/history/all/" : "/api/history/recent/";
     final url = Uri.parse("$_baseUrl$endpoint");
@@ -191,7 +190,6 @@ class AuthState extends ChangeNotifier {
 
     var response = await http.get(url, headers: headers);
 
-    // Si 401 (token expiré), on tente un refresh automatique
     if (response.statusCode == 401 && _token != null) {
       final success = await _attemptTokenRefresh();
       if (success) {
@@ -202,37 +200,7 @@ class AuthState extends ChangeNotifier {
     return response;
   }
 
-  // --- GESTION DES DONNÉES DE CORRECTION ---
-  void setPendingText(String text) {
-    _pendingText = text;
-    notifyListeners();
-  }
-
-  void setPendingSentenceId(int id) {
-    _pendingSentenceId = id;
-    notifyListeners();
-  }
-
-  void setPendingTranslationId(int? id) {
-    _pendingTranslationId = id;
-    notifyListeners();
-  }
-
-  void clearPendingData() {
-    _pendingText = null;
-    _pendingSentenceId = null;
-    _pendingTranslationId = null;
-    notifyListeners();
-  }
-
-  void clearLastTranslationData() {
-    _lastTranslatedText = null;
-    _lastTranslatedSentences = [];
-    _lastTranslationId = null;
-    notifyListeners();
-  }
-
-  // --- REQUÊTES AUTHENTIFIÉES ---
+  // --- REQUÊTES AUTHENTIFIÉES (JSON) ---
   Future<http.Response> getWithAuth(String endpoint, {bool retry = true}) async {
     if (_token == null) throw Exception("Non authentifié");
     final url = Uri.parse("$_baseUrl$endpoint");
@@ -270,6 +238,33 @@ class AuthState extends ChangeNotifier {
     return response;
   }
 
+  // --- NOUVEAU : ENVOI DE FICHIERS (MULTIPART) ---
+  Future<http.StreamedResponse> sendMultipartWithAuth(http.MultipartRequest request, {bool retry = true}) async {
+    // Ajout du Token Bearer
+    if (_token != null) {
+      request.headers['Authorization'] = 'Bearer $_token';
+    }
+    
+    // Header Accept requis pour le JSON en retour
+    request.headers['Accept'] = 'application/json';
+
+    var streamedResponse = await request.send();
+
+    // Gestion du rafraîchissement de session automatique
+    if (streamedResponse.statusCode == 401 && retry && _refreshToken != null) {
+      final success = await _attemptTokenRefresh();
+      if (success) {
+        // Note: Sur un MultipartRequest, on ne peut pas faire un retry simple
+        // car le flux de données du fichier est déjà fermé après request.send().
+        // L'utilisateur devra généralement relancer l'action si le token expire pile à ce moment.
+        debugPrint("Token refresh réussi après 401 Multipart");
+      }
+    }
+
+    return streamedResponse;
+  }
+
+  // --- TOKEN REFRESH ---
   Future<bool> _attemptTokenRefresh() async {
     if (_refreshToken == null) return false;
     final url = Uri.parse("$_baseUrl/api/token/refresh/");
@@ -290,7 +285,26 @@ class AuthState extends ChangeNotifier {
     } catch (e) {
       debugPrint("Refresh Token Error: $e");
     }
-    await logout(); // Si le refresh échoue, on déconnecte
+    await logout(); 
     return false;
+  }
+
+  // --- SETTERS DONNÉES TEMPORAIRES ---
+  void setPendingText(String text) => { _pendingText = text, notifyListeners() };
+  void setPendingSentenceId(int id) => { _pendingSentenceId = id, notifyListeners() };
+  void setPendingTranslationId(int? id) => { _pendingTranslationId = id, notifyListeners() };
+  
+  void clearPendingData() {
+    _pendingText = null;
+    _pendingSentenceId = null;
+    _pendingTranslationId = null;
+    notifyListeners();
+  }
+
+  void clearLastTranslationData() {
+    _lastTranslatedText = null;
+    _lastTranslatedSentences = [];
+    _lastTranslationId = null;
+    notifyListeners();
   }
 }

@@ -1,41 +1,22 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:provider/provider.dart';
-import 'package:flutter/services.dart'; 
+import 'package:flutter/services.dart';
 import 'api_constants.dart';
 import 'auth_state.dart';
 import 'SenTekkiColors.dart';
-import 'registration/login.dart';
-// --- PlaceholderScreen (Aucun changement) ---
-class PlaceholderScreen extends StatelessWidget {
-  final String title;
-  const PlaceholderScreen({super.key, required this.title});
 
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        "Page $title en construction.",
-        style: TextStyle(fontSize: 24, color: SenTekkiColors.primary),
-      ),
-    );
-  }
-}
-
-// ------------------------------------------------------------------
-// --- CorrectionScreen (MIS À JOUR et bien indenté) ---
-// ------------------------------------------------------------------
+// --- CorrectionScreen ---
 class CorrectionScreen extends StatefulWidget {
   final String sentenceText;
-  final int sentenceId; 
-  // 🚨 NOUVELLE PROPRIÉTÉ : L'ID de l'enregistrement de traduction global (Translator.id)
-  final int translationId; 
+  final int sentenceId;
+  final int translationId;
 
   const CorrectionScreen({
     super.key,
     required this.sentenceText,
     required this.sentenceId,
-    required this.translationId, // 🚨 Ajout de l'ID de traduction
+    required this.translationId,
   });
 
   @override
@@ -45,13 +26,11 @@ class CorrectionScreen extends StatefulWidget {
 class _CorrectionScreenState extends State<CorrectionScreen> {
   late TextEditingController _controller;
   bool _isSaving = false;
-  
-  String _errorMessage = ""; 
+  String _errorMessage = "";
 
   @override
   void initState() {
     super.initState();
-    // Initialiser le contrôleur avec le texte existant (traduit)
     _controller = TextEditingController(text: widget.sentenceText);
   }
 
@@ -61,47 +40,16 @@ class _CorrectionScreenState extends State<CorrectionScreen> {
     super.dispose();
   }
 
-  void _onItemTapped(int index) {
-    // Retourne toujours à l'écran de traduction (index 0)
-    if (index == 0) {
-      Navigator.pop(context);
-      return;
-    }
-    
-    // ... (Logique pour d'autres onglets)
-    String title;
-    switch (index) {
-      case 1:
-        title = "Dictionnaire";
-        break;
-      case 2:
-        title = "Historique";
-        break;
-      case 3:
-        title = "Jeux";
-        break;
-      default:
-        return;
-    }
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Redirection vers l'onglet : $title")),
-      );
-      Navigator.pop(context); // Retour à la page précédente (Home)
-    }
-  }
-  
   void _copyOriginalText() {
     Clipboard.setData(ClipboardData(text: widget.sentenceText));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Phrase originale copiée.")),
+      const SnackBar(
+        content: Text("Texte copié dans le presse-papier"),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
-  // ----------------------------------------------------
-  // Logique de Sauvegarde (CORRIGÉE pour correspondre à Django)
-  // ----------------------------------------------------
   Future<void> _saveCorrection() async {
     final correctionText = _controller.text.trim();
 
@@ -110,10 +58,9 @@ class _CorrectionScreenState extends State<CorrectionScreen> {
       _errorMessage = "";
     });
 
-    // 1. VÉRIFICATION CRITIQUE DE L'ID DE TRADUCTION
-    if (widget.translationId <= 0) { // 🚨 Utilise translationId
+    if (widget.translationId <= 0) {
       setState(() {
-        _errorMessage = "ID de traduction invalide (ID: ${widget.translationId}). Impossible d'enregistrer.";
+        _errorMessage = "ID de traduction invalide.";
         _isSaving = false;
       });
       return;
@@ -121,15 +68,7 @@ class _CorrectionScreenState extends State<CorrectionScreen> {
 
     if (correctionText.isEmpty) {
       setState(() {
-        _errorMessage = "La correction ne peut pas être vide.";
-        _isSaving = false;
-      });
-      return;
-    }
-    
-    if (correctionText == widget.sentenceText.trim()) {
-      setState(() {
-        _errorMessage = "La correction proposée est identique à l'originale.";
+        _errorMessage = "Le champ de correction est vide.";
         _isSaving = false;
       });
       return;
@@ -137,27 +76,15 @@ class _CorrectionScreenState extends State<CorrectionScreen> {
 
     final authState = Provider.of<AuthState>(context, listen: false);
 
-    // 2. VÉRIFICATION DE L'AUTHENTIFICATION 
-    if (!authState.isAuthenticated) {
-      setState(() {
-        _errorMessage = "Veuillez vous reconnecter pour enregistrer cette correction.";
-        _isSaving = false;
-      });
-      return;
-    }
-    
-    const endpoint = ApiConstants.addCorrectionEndpoint; 
-    
     try {
-      // 🚨 CORRECTION CLÉ API : Utilise `widget.translationId` comme `translator_id`
       final bodyData = {
-        "translator_id": widget.translationId, // 🎯 Utilise l'ID de la TRADUCTION globale
-        "phrase_source": widget.sentenceText,  // Texte original de la phrase
-        "phrase_corrigee": correctionText,     // Texte corrigé
+        "translator_id": widget.translationId,
+        "phrase_source": widget.sentenceText,
+        "phrase_corrigee": correctionText,
       };
 
       final response = await authState.postWithAuth(
-        endpoint,
+        ApiConstants.addCorrectionEndpoint,
         bodyData,
         retry: true,
       );
@@ -166,221 +93,146 @@ class _CorrectionScreenState extends State<CorrectionScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Correction enregistrée avec succès ! Merci pour votre contribution. 🎉"),
-              backgroundColor: SenTekkiColors.primary,
+              content: Text("Correction enregistrée avec succès ! 🎉"),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
             ),
           );
-          
-          // Vider les données en attente et de dernière traduction après succès
-          authState.clearPendingData();
-          authState.clearLastTranslationData();
-          
-          Navigator.pop(context); // Retour à la page précédente (Home)
+          // TRÈS IMPORTANT : On renvoie 'true' pour que la page précédente se rafraîchisse
+          Navigator.pop(context, true); 
         }
       } else {
-        // Gestion détaillée des erreurs API
-        String apiError = response.reasonPhrase ?? "Erreur inconnue";
+        String apiError = "Erreur serveur (${response.statusCode})";
         try {
-          final error = jsonDecode(response.body);
-          apiError = error['error'] ?? error['detail'] ?? error.toString();
-        } catch (_) {
-          // Afficher une partie du corps si le JSON est invalide
-          apiError = "Erreur API (${response.statusCode}): ${response.body.substring(0, response.body.length < 50 ? response.body.length : 50)}...";
-        }
-        
-        if (mounted) {
-          setState(() {
-            _errorMessage = apiError;
-          });
-        }
+          final error = jsonDecode(utf8.decode(response.bodyBytes));
+          apiError = error['error'] ?? error['detail'] ?? apiError;
+        } catch (_) {}
+        if (mounted) setState(() => _errorMessage = apiError);
       }
-    } on Exception catch (e) {
-      if (mounted) {
-        setState(() {
-            _errorMessage = "Échec de la requête réseau: ${e.toString()}";
-        });
-      }
+    } catch (e) {
+      if (mounted) setState(() => _errorMessage = "Erreur réseau : $e");
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  // ----------------------------------------------------
-  // Widget build (UI)
-  // ----------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SenTekkiColors.background,
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
+        title: const Text("Apporter une correction", style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: SenTekkiColors.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: false,
-        title: const Row(
-          children: [
-            Icon(Icons.edit_note, color: Colors.white, size: 28),
-            SizedBox(width: 8),
-            Text(
-              "Correction de Phrase",
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Phrase à corriger (affichage de l'ID de traduction)
+            // --- SECTION TEXTE ORIGINAL ---
+            const Text(
+              "TEXTE ORIGINAL",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2),
+            ),
+            const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.all(15),
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: SenTekkiColors.lightGray,
-                borderRadius: BorderRadius.circular(15),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.withOpacity(0.2)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Text(
-                    // 💡 Afficher l'ID de traduction pour le débogage
-                    "Phrase à corriger (ID de Traduction: ${widget.translationId} | Index: ${widget.sentenceId}) :", 
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: SenTekkiColors.primary.withOpacity(0.8),
+                  Expanded(
+                    child: Text(
+                      widget.sentenceText,
+                      style: const TextStyle(fontSize: 16, color: Colors.black87, height: 1.4),
                     ),
                   ),
-                  const SizedBox(height: 5),
-                  // Ajout d'un bouton de copie pour l'ergonomie
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.sentenceText,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Colors.black87,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
-                        onPressed: _copyOriginalText,
-                        tooltip: "Copier le texte original",
-                      ),
-                    ],
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, color: Colors.grey, size: 20),
+                    onPressed: _copyOriginalText,
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
             
-            // Champ de correction
+            const SizedBox(height: 24),
+
+            // --- SECTION CHAMP DE CORRECTION ---
+            const Text(
+              "VOTRE CORRECTION",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2),
+            ),
+            const SizedBox(height: 8),
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
+                borderRadius: BorderRadius.circular(12),
                 boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.2),
-                    spreadRadius: 1,
-                    blurRadius: 5,
-                    offset: const Offset(0, 3),
-                  ),
+                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
               ),
               child: TextField(
                 controller: _controller,
-                maxLines: 6,
+                maxLines: 8,
+                style: const TextStyle(fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: "Saisissez la correction ici...",
-                  labelText: "Votre meilleure correction",
-                  labelStyle: TextStyle(color: SenTekkiColors.primary),
+                  hintText: "Saisissez la version correcte ici...",
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: SenTekkiColors.primary.withOpacity(0.3)),
                   ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.all(15.0),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: SenTekkiColors.primary, width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.all(16),
                 ),
-                style: const TextStyle(fontSize: 16.0),
               ),
             ),
-            const SizedBox(height: 25),
-            
-            // Bouton Enregistrer
+
+            const SizedBox(height: 20),
+
+            // --- MESSAGE D'ERREUR ---
+            if (_errorMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(_errorMessage, style: const TextStyle(color: Colors.red))),
+                  ],
+                ),
+              ),
+
+            // --- BOUTON VALIDER ---
             SizedBox(
-              height: 50,
+              width: double.infinity,
+              height: 55,
               child: ElevatedButton(
                 onPressed: _isSaving ? null : _saveCorrection,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: SenTekkiColors.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  elevation: 4,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 2,
                 ),
                 child: _isSaving
                     ? const CircularProgressIndicator(color: Colors.white)
                     : const Text(
-                        "ENREGISTRER LA CORRECTION",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white),
+                        "ENREGISTRER LA MODIFICATION",
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
               ),
             ),
-            const SizedBox(height: 20),
-            
-            // Affichage du message d'erreur
-            if (_errorMessage.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  "Erreur : $_errorMessage",
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                ),
-              ),
           ],
         ),
-      ),
-      
-      // Bottom Navigation Bar (inchangée)
-      bottomNavigationBar: BottomNavigationBar(
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.compare_arrows),
-            label: 'Traduction',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.book_outlined),
-            label: 'Dictionnaire',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.history),
-            label: 'Historique',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.videogame_asset_outlined),
-            label: 'Jeux',
-          ),
-        ],
-        currentIndex: 0, 
-        selectedItemColor: SenTekkiColors.primary,
-        unselectedItemColor: Colors.grey,
-        onTap: _onItemTapped,
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        elevation: 10,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
       ),
     );
   }

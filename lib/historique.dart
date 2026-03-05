@@ -3,8 +3,6 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'auth_state.dart';
 import 'nav_bar.dart'; 
-import 'home.dart';
-import 'correctionspage.dart'; // Import de ta nouvelle page
 import 'custom_app_bar.dart';
 
 class TranslationHistoryPage extends StatefulWidget {
@@ -18,46 +16,22 @@ class _TranslationHistoryPageState extends State<TranslationHistoryPage> {
   List translations = [];
   bool isLoading = true;
   bool isFullHistory = false;
-  int _selectedIndex = 2; // Index pour l'historique
+  final int _selectedIndex = 2; // Index constant pour l'historique
 
   @override
   void initState() {
     super.initState();
-    // Utilisation de la méthode sécurisée de AuthState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchData(isRecent: true);
     });
   }
 
-  // --- LOGIQUE DE NAVIGATION CORRIGÉE ---
-  void _onNavigationChanged(int index) {
-    if (index == _selectedIndex) return;
-
-    Widget nextPage;
-    switch (index) {
-      case 0:
-        nextPage = const Home();
-        break;
-      case 3:
-        nextPage = const PendingCorrectionsPage();
-        break;
-      default:
-        return;
-    }
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => nextPage),
-    );
-  }
-
-  // --- RÉCUPÉRATION DES DONNÉES VIA AUTHSTATE ---
+  // --- RÉCUPÉRATION DES DONNÉES ---
   Future<void> _fetchData({required bool isRecent}) async {
     setState(() => isLoading = true);
     final auth = Provider.of<AuthState>(context, listen: false);
     
     try {
-      // On utilise getHistory() qui gère les tokens et le refresh auto
       final response = await auth.getHistory(all: !isRecent);
 
       if (response.statusCode == 200) {
@@ -78,13 +52,17 @@ class _TranslationHistoryPageState extends State<TranslationHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final Color primaryGreen = const Color(0xFF00A86B);
+    const Color primaryGreen = Color(0xFF00A86B);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F6), // Fond assorti au reste
+      backgroundColor: const Color(0xFFF4F7F6),
+      // --- AJOUTS INDISPENSABLES ---
       appBar: const CustomAppBar(currentPageTitle: "Historique"),
+      endDrawer: const CustomSideMenu(), // Permet l'ouverture du menu latéral
+      bottomNavigationBar: const CustomBottomNavBar(currentIndex: 2), // Navigation auto
+      // ------------------------------
       body: isLoading
-          ? Center(child: CircularProgressIndicator(color: primaryGreen))
+          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
           : RefreshIndicator(
               onRefresh: () => _fetchData(isRecent: !isFullHistory),
               color: primaryGreen,
@@ -101,13 +79,10 @@ class _TranslationHistoryPageState extends State<TranslationHistoryPage> {
                       },
                     ),
             ),
-      bottomNavigationBar: CustomBottomNavBar(
-        currentIndex: _selectedIndex,
-        onTap: _onNavigationChanged,
-      ),
     );
   }
 
+  // --- TES WIDGETS DE CONSTRUCTION (CARTES, BOUTONS, ETC.) ---
   Widget _buildHistoryCard(Map t, Color primaryGreen) {
     String displayUser = "Anonyme";
     if (t['user'] != null && t['user'] is Map) {
@@ -125,7 +100,7 @@ class _TranslationHistoryPageState extends State<TranslationHistoryPage> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20), // Coins plus doux
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(

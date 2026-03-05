@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-// Importations de vos pages
+
+// --- IMPORTATIONS DES PAGES ---
 import 'home.dart'; 
 import 'auth_state.dart'; 
 import 'registration/login.dart';
 import 'registration/signup.dart';
+import 'dictionnaire.dart';
+import 'historique.dart'; // Assure-toi que le fichier existe
+import 'CorrectionsPage.dart'; // Assure-toi que le fichier existe
 import 'SenTekkiColors.dart'; 
 
 void main() {
@@ -27,25 +31,26 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primaryColor: SenTekkiColors.primary,
         primarySwatch: SenTekkiColors.primaryMaterial, 
+        fontFamily: 'Roboto', 
       ),
-      // 🎯 CORRECTION: Utilise HomeWrapper comme page de démarrage (home)
-      // Ce wrapper est conçu pour initialiser AuthState et afficher Home.
+      
       home: const HomeWrapper(), 
+
+      // --- TABLE DES ROUTES (Le GPS de l'application) ---
+      // Les noms ici doivent être IDENTIQUES à ceux dans nav_bar.dart
       routes: {
-        // La page Home n'a plus besoin d'être une route si c'est la page principale.
-        // '/home': (_) => const Home(), 
         '/login': (_) => const LoginScreen(),
         '/signup': (_) => const SignUpScreen(),
+        '/translation': (_) => const Home(), 
+        '/dictionary': (_) => const DictionaryScreen(),
+        '/history': (_) => const TranslationHistoryPage(), 
+        '/corrections': (_) => const PendingCorrectionsPage(),
       },
     );
   }
 }
 
-// --------------------------------------------------------------------------
-// 🚦 CLASSE HOMEWRAPPER (Nouveau Wrapper pour la page principale)
-// --------------------------------------------------------------------------
-// Ce wrapper assure que l'état d'authentification est chargé avant d'afficher
-// la page Home, mais affiche toujours Home en premier.
+// 🚦 CLASSE HOMEWRAPPER (Vérification de l'auth au démarrage)
 class HomeWrapper extends StatefulWidget {
   const HomeWrapper({super.key});
 
@@ -54,19 +59,17 @@ class HomeWrapper extends StatefulWidget {
 }
 
 class _HomeWrapperState extends State<HomeWrapper> {
-  // Indicateur que l'état initial (checkLogin) a été complété
   bool _isAuthChecked = false;
 
   @override
   void initState() {
     super.initState();
-    // Lance la vérification de l'état de connexion au démarrage
     _initializeAuth();
   }
 
   Future<void> _initializeAuth() async {
     final authState = Provider.of<AuthState>(context, listen: false);
-    await authState.checkLogin(); // ⬅️ Attendre la lecture de SharedPreferences
+    await authState.checkLogin(); 
     if (mounted) {
       setState(() {
         _isAuthChecked = true;
@@ -76,20 +79,16 @@ class _HomeWrapperState extends State<HomeWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Afficher un indicateur pendant la vérification du token
     if (!_isAuthChecked) {
       return const Scaffold(
+        backgroundColor: Colors.white,
         body: Center(
-          child: CircularProgressIndicator(),
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00A86B)),
+          ),
         ),
       );
     }
-    
-    // 2. Une fois que la vérification est terminée (quel que soit le résultat),
-    // nous affichons la page Home pour permettre la traduction libre.
-    return  Home(); 
-    
-    // Note: L'état de connexion (authState.isLoggedIn) est maintenant 
-    // disponible pour la page Home et ses enfants.
+    return const Home(); 
   }
 }
