@@ -267,7 +267,7 @@ class _HomeState extends State<Home> {
             _buildInputSection(),
             const SizedBox(height: 15),
             _buildTranslateButton(),
-            if (_sentences.isNotEmpty) _buildResultSection(isCorrector),
+            _buildResultSection(isCorrector), // if (_sentences.isNotEmpty) Afficher ou cacher la sortie
           ],
         ),
       ),
